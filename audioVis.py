@@ -53,8 +53,11 @@ class AudioVisPanel(bpy.types.Panel):
         # Color
         layout.prop(context.scene, "audio_vis_color")           
         if context.scene.audio_vis_color:
-            layout.prop_search(context.scene, "audio_vis_chosen_material", bpy.context.active_object, "material_slots", "Material")
-        
+            #layout.prop_search(context.scene, "audio_vis_chosen_material", bpy.context.active_object, "material_slots", "Material")
+            layout.operator("object.audio_vis_add_color_ramp")
+            
+            cr_node = bpy.data.materials['Ramp Material'].node_tree.nodes['ColorRamp']
+            layout.template_color_ramp(cr_node, "color_ramp", expand=True)
         
         
         # F-Curve bake options
@@ -132,6 +135,48 @@ class AudioVis(bpy.types.Operator):
             False
         
         bpy.context.area.type = 'VIEW_3D'
+        
+        return {'FINISHED'}
+        
+        
+class AudioVisColorRamp(bpy.types.Operator):
+    """Create a Color ramp"""
+    bl_idname = "object.audio_vis_add_color_ramp"
+    bl_label = "Add Color Ramp"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        
+        def addColorRamp():
+            material = bpy.data.materials.new("Ramp Material")
+
+            material.use_nodes = True
+            nodes = material.node_tree.nodes
+            
+            # Add the color ramp
+            node = nodes.new('ShaderNodeValToRGB')
+            node.location = -100, 0
+            
+            # Mode the other nodes
+            node = nodes['Material Output']
+            node.location = 400, 0
+            
+            node = nodes['Diffuse BSDF']
+            node.location = 200, 0
+            
+            # Connect the nodes
+            output = nodes['ColorRamp'].outputs['Color']
+            input = nodes['Diffuse BSDF'].inputs['Color']
+            material.node_tree.links.new(output, input)
+            
+            output = nodes['Diffuse BSDF'].outputs['BSDF']
+            input = nodes['Material Output'].inputs['Surface']
+            material.node_tree.links.new(output, input)
+            
+            # Add to object
+            bpy.context.object.data.materials.append(material)
+        
+        addColorRamp()
         
         return {'FINISHED'}
 
@@ -232,10 +277,12 @@ def properties():
 def register():
     bpy.utils.register_class(AudioVisPanel)
     bpy.utils.register_class(AudioVis)
+    bpy.utils.register_class(AudioVisColorRamp)
     
     properties()
    
 def unregister():
     bpy.utils.unregister_class(AudioVisPanel)
     bpy.utils.unregister_class(AudioVis)
+    bpy.utils.unregister_class(AudioVisColorRamp)
     
