@@ -1,3 +1,21 @@
+"""
+Easy Audio Visualizer - Blender Audio Visualizer
+Copyright (C) 2014 Nathan Craddock
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+"""
+
 bl_info = {
     "name": "Easy Audio Vis",
     "author": "Nathan Craddock",
@@ -53,16 +71,33 @@ class AudioVisPanel(bpy.types.Panel):
         # Color
         layout.prop(context.scene, "audio_vis_color")           
         if context.scene.audio_vis_color:
-            #layout.prop_search(context.scene, "audio_vis_chosen_material", bpy.context.active_object, "material_slots", "Material")
+            layout.prop_search(context.scene, "audio_vis_chosen_material", bpy.context.active_object, "material_slots", "Material")
+        
             layout.operator("object.audio_vis_add_color_ramp")
-            
-            cr_node = bpy.data.materials['Ramp Material'].node_tree.nodes['ColorRamp']
-            layout.template_color_ramp(cr_node, "color_ramp", expand=True)
         
-        
-        # F-Curve bake options
-        layout.label(text = "Bake options:")
+            if context.scene.audio_vis_chosen_material:
+                try:
+                    cr_node = bpy.data.materials[context.scene.audio_vis_chosen_material].node_tree.nodes['ColorRamp']
+                    layout.template_color_ramp(cr_node, "color_ramp", expand=True)
+                except:
+                    False
+            else:
+                layout.label(text = "No color ramp found in material")
 
+
+
+class AudioVisPanelBakeOptions(bpy.types.Panel):
+    """Audio Visualizer Panel Bake Options"""
+    bl_category = "AudioVis"
+    bl_idname = "AUDIO_VIS_BAKE_OPTIONS"
+    bl_context = "objectmode"
+    bl_label = "Bake Options"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'TOOLS'
+    
+    def draw(self, context):
+        layout = self.layout
+        
         row = layout.row()
         row.prop(context.scene, "audio_vis_low_freq")
         row.prop(context.scene, "audio_vis_high_freq")
@@ -76,6 +111,21 @@ class AudioVisPanel(bpy.types.Panel):
         
         row = layout.row()
         row.operator("object.audio_vis_run")
+
+        
+class AudioVisPanelOther(bpy.types.Panel):
+    """Audio Visualizer Panel Other Options"""
+    bl_category = "AudioVis"
+    bl_idname = "AUDIO_VIS_OTHER"
+    bl_context = "objectmode"
+    bl_label = "Other Settings"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'TOOLS'
+    
+    def draw(self, context):
+        layout = self.layout
+        
+        layout.prop(context.scene, "audio_vis_auto_timeline")
         
 class AudioVis(bpy.types.Operator):
     """Run the addon"""
@@ -87,6 +137,7 @@ class AudioVis(bpy.types.Operator):
         
         def insertKeyframes():           
             locRotScaleKeyframes()
+            colorKeyframes()
         
         def locRotScaleKeyframes():
             object = bpy.context.object
@@ -114,6 +165,11 @@ class AudioVis(bpy.types.Operator):
             if bpy.context.scene.audio_vis_scale_z:
                 object.keyframe_insert(data_path = "scale", index = 2)
         
+        def colorKeyframes():
+            
+            if context.scene.audio_vis_color:
+                bpy.data.materials[context.scene.audio_vis_chosen_material].node_tree.nodes["Value"].outputs[0].keyframe_insert(data_path = 'default_value')
+        
         insertKeyframes()
         
         bpy.context.area.type = 'SEQUENCE_EDITOR'
@@ -136,6 +192,11 @@ class AudioVis(bpy.types.Operator):
         
         bpy.context.area.type = 'VIEW_3D'
         
+        if context.scene.audio_vis_auto_timeline:
+            bpy.context.scene.frame_end = bpy.context.sequences[0].frame_final_duration
+            bpy.ops.time.view_all()
+        
+        
         return {'FINISHED'}
         
         
@@ -148,14 +209,17 @@ class AudioVisColorRamp(bpy.types.Operator):
     def execute(self, context):
         
         def addColorRamp():
-            material = bpy.data.materials.new("Ramp Material")
+            material = bpy.data.materials[context.scene.audio_vis_chosen_material]
 
             material.use_nodes = True
             nodes = material.node_tree.nodes
             
-            # Add the color ramp
+            # Add the color ramp and value nodes
             node = nodes.new('ShaderNodeValToRGB')
             node.location = -100, 0
+            
+            node = nodes.new('ShaderNodeValue')
+            node.location = -300, 0
             
             # Mode the other nodes
             node = nodes['Material Output']
@@ -165,6 +229,10 @@ class AudioVisColorRamp(bpy.types.Operator):
             node.location = 200, 0
             
             # Connect the nodes
+            output = nodes['Value'].outputs['Value']
+            input = nodes['ColorRamp'].inputs['Fac']
+            material.node_tree.links.new(output, input)
+            
             output = nodes['ColorRamp'].outputs['Color']
             input = nodes['Diffuse BSDF'].inputs['Color']
             material.node_tree.links.new(output, input)
@@ -172,9 +240,6 @@ class AudioVisColorRamp(bpy.types.Operator):
             output = nodes['Diffuse BSDF'].outputs['BSDF']
             input = nodes['Material Output'].inputs['Surface']
             material.node_tree.links.new(output, input)
-            
-            # Add to object
-            bpy.context.object.data.materials.append(material)
         
         addColorRamp()
         
@@ -272,10 +337,17 @@ def properties():
         default = False)
         
     bpy.types.Scene.audio_vis_chosen_material = bpy.props.StringProperty()
+    
+    bpy.types.Scene.audio_vis_auto_timeline = bpy.props.BoolProperty(
+        name = "Timeline to audio length",
+        description = "Set the timeline length to the length of the audio",
+        default = False)
 
     
 def register():
     bpy.utils.register_class(AudioVisPanel)
+    bpy.utils.register_class(AudioVisPanelBakeOptions)
+    bpy.utils.register_class(AudioVisPanelOther)
     bpy.utils.register_class(AudioVis)
     bpy.utils.register_class(AudioVisColorRamp)
     
@@ -283,6 +355,8 @@ def register():
    
 def unregister():
     bpy.utils.unregister_class(AudioVisPanel)
+    bpy.utils.unregister_class(AudioVisPanelBakeOptions)
+    bpy.utils.unregister_class(AudioVisPanelOther)
     bpy.utils.unregister_class(AudioVis)
     bpy.utils.unregister_class(AudioVisColorRamp)
     
